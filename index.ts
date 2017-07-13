@@ -5,6 +5,8 @@ import { rsiLogger } from "../../log";
 import { Service, Resource, Element, ResourceUpdate, StatusCode, ElementResponse, CollectionResponse } from "../rsiPlugin";
 import { GuideObject, PositioningObject } from "./schema";
 
+import * as polyline from '@mapbox/polyline';
+
 class RouteGuidance extends Service {
   constructor() {
     super();
@@ -27,6 +29,7 @@ class Guides implements Resource {
   private _logger = rsiLogger.getInstance().getLogger("routeguidance");
 
   constructor(private service: Service) {
+    let newId = uuid.v1();
     let defaultGuide = new BehaviorSubject<GuideElement>({
       lastUpdate: Date.now(),
       propertiesChanged: [],
@@ -35,10 +38,14 @@ class Guides implements Resource {
         id: Guides.defaultGuideId,
         name: "default",
         status: "idle",
+        positioning: {
+          id: newId,
+          name: "-",
+          uri: "/" + this.service.name.toLowerCase() + "/positionings/" + newId,
+        }
       }
     });
     this._guides.push(defaultGuide);
-
     this._change = new BehaviorSubject(<ResourceUpdate>{ lastUpdate: Date.now(), action: 'init' });
   }
 
@@ -75,25 +82,56 @@ class Guides implements Resource {
     return { status: "ok", data: resp };
   };
 
+  private _interval: NodeJS.Timer;
+  private _currentRoute: number[][] = [];
+  private _nextIndex: number = -1;
+
   updateElement(elementId: string, difference: any): ElementResponse {
     let element = (<BehaviorSubject<GuideElement>>this.getElement(elementId).data);
     var guide: GuideObject = element.getValue().data;
     let propertiesChanged: string[] = [];
 
-    if (difference.hasOwnProperty("positioning")) {
-      guide.positioning = difference.positioning;
-      propertiesChanged.push("positioning");
-    }
-
     if (difference.hasOwnProperty("route")) {
       guide.route = difference.route;
       propertiesChanged.push("route");
+
+      clearInterval(this._interval);
+      this._currentRoute = polyline.decode(guide.route.path);
+
+      if(this._currentRoute.length > 0) {
+        this._nextIndex = 0;
+      } else {
+        this._nextIndex = -1;
+      }
     }
 
     if (difference.hasOwnProperty("status")) {
       if (-1 !== ["idle", "guiding"].indexOf(difference.status)) {
         guide.status = difference.status;
         propertiesChanged.push("status");
+
+        if(guide.status == "guiding" && this._nextIndex >= 0) {
+          const speed = 1000;
+
+          this._interval = setInterval(() => {
+            guide.positioning.name =
+              this._currentRoute[this._nextIndex][0] + ", " +
+              this._currentRoute[this._nextIndex][1];
+
+            element.next(
+              {
+                lastUpdate: Date.now(),
+                propertiesChanged: ["positioning"],
+                data: guide
+              });
+
+            if((this._nextIndex + 1) < (this._currentRoute.length - 1)) {
+              this._nextIndex++;
+            } else {
+              this._nextIndex = -1;
+            }
+          }, speed);
+        }
       }
     }
 
@@ -102,7 +140,9 @@ class Guides implements Resource {
       propertiesChanged: propertiesChanged,
       data: guide
     };
+
     element.next(resp); // @TODO: check diffs bevor updating without a need
+
     return { status: "ok" };
   };
 }
