@@ -40,7 +40,7 @@ class Guides implements Resource {
         status: "idle",
         positioning: {
           id: newId,
-          name: "-",
+          name: "52.371937, 10.730174",
           uri: "/" + this.service.name.toLowerCase() + "/positionings/" + newId,
         }
       }
@@ -114,6 +114,10 @@ class Guides implements Resource {
           const speed = 1000;
 
           this._interval = setInterval(() => {
+            if(!this._currentRoute[this._nextIndex]) {  
+              return;
+            }
+
             guide.positioning.name =
               this._currentRoute[this._nextIndex][0] + ", " +
               this._currentRoute[this._nextIndex][1];
@@ -131,6 +135,8 @@ class Guides implements Resource {
               this._nextIndex = -1;
             }
           }, speed);
+        } else {
+          clearInterval(this._interval);
         }
       }
     }
